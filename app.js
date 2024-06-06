@@ -3,6 +3,8 @@ const multer = require("multer");
 const pdf = require("pdf-parse");
 const textract = require("textract");
 const OpenAI = require("openai");
+const { db } = require("./firebaseConfig");
+const { doc, getDoc } = require("firebase/firestore");
 
 require("dotenv").config();
 
@@ -16,10 +18,12 @@ const fileFilter = (req, file, cb) => {
     "text/plain",
     "application/pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "multipart/form-data",
   ];
 
   if (allowedMimeTypes.includes(file.mimetype)) {
     cb(null, true);
+    console.log("File is compatible");
   } else {
     cb(new Error("Unsupported file type"), false);
   }
@@ -28,10 +32,11 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({
   storage: multer.memoryStorage(),
   fileFilter: fileFilter,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB limit
+  limits: { fileSize: 10 * 1024 * 1024 },
 });
 
 app.post("/upload", upload.single("document"), async (req, res) => {
+  console.log("endpoint hit");
   if (!req.file) {
     return res.status(400).send("No file uploaded.");
   }
@@ -55,6 +60,8 @@ app.post("/upload", upload.single("document"), async (req, res) => {
       });
     }
 
+    console.log("Document content:", documentContent);
+
     const completion = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
       messages: [
@@ -77,6 +84,44 @@ app.post("/upload", upload.single("document"), async (req, res) => {
   } catch (error) {
     console.error("Error processing the file:", error);
     res.status(500).send("Failed to process the document.");
+  }
+});
+
+app.get("/noteCardSets", async (req, res) => {
+  const userId = req.query.userId;
+  const setId = req.query.setId;
+
+  if (!userId || !setId) {
+    return res.status(400).send("Missing required parameters.");
+  }
+
+  try {
+    const docRef = doc(db, "userCollections", userId);
+
+    const docSnap = await getDoc(docRef);
+
+    if (!docSnap.exists) {
+      return res.status(404).send("Document not found.");
+    }
+
+    const { cardSets } = docSnap.data();
+
+    console.log("Card sets:", cardSets);
+
+    if (!cardSets) {
+      return res.status(404).send("Card sets not found.");
+    }
+
+    const data = cardSets.find((set) => set.setId === setId);
+
+    if (!data) {
+      return res.status(404).send("Card set not found.");
+    }
+
+    res.json(data);
+  } catch (error) {
+    console.error("Error retrieving the document:", error);
+    res.status(500).send("Failed to retrieve the document.");
   }
 });
 
